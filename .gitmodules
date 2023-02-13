@@ -1,0 +1,6 @@
+[submodule ".\\dep\\lithium\\"]
+	path = .\\dep\\lithium\\
+	url = git@github.com:filipfur/lithium.git
+[submodule "lithium"]
+	path = lithium
+	url = git@github.com:filipfur/lithium.git
