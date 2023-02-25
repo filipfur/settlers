@@ -17,4 +17,5 @@ void main()
     fragColor = diffuse * 0.25f;
     /*float mask = step(length(fragColor.rgb), 0);
     fragColor += vec4(vec3((texCoord.y + 0.15) * 0.5), 1.0) * mask;*/
+    //fragColor.rgb = pow(fragColor.rgb, vec3(1.0/2.2));
 }

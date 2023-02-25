@@ -5,6 +5,7 @@
 #include "glframebuffer.h"
 #include "glorthographiccamera.h"
 #include "gltext.h"
+#include "glinstancedobject.h"
 
 using attr = lithium::VertexArrayBuffer::AttributeType;
 static constexpr attr POSITION{attr::VEC3};
@@ -25,7 +26,8 @@ public:
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glLineWidth(3.0f);
+        glCullFace(GL_BACK);
+        glEnable(GL_CULL_FACE);
         _screenMesh.reset(new lithium::Mesh({POSITION, NORMAL, UV, COLOR}, {
             -1.0, -1.0, 0.0f, 	0.0f, 1.0f, 0.0f,	0.0f, 0.0f,   1.0f, 0.0f, 0.0f,
             -1.0,  1.0, 0.0f, 	0.0f, 1.0f, 0.0f,	0.0f, 1.0,    0.0f, 1.0f, 0.0f,
@@ -36,20 +38,23 @@ public:
             0, 2, 1,
             0, 3, 2
         }));
-        _blockShader = std::make_shared<lithium::ShaderProgram>("shaders/blockshader.vert", "shaders/blockshader.frag");
+        _blockShader = std::make_shared<lithium::ShaderProgram>("shaders/object.vert", "shaders/object.frag");
         _blockShader->setUniform("u_texture_0", 0);
-        _blockShader->setUniform("u_projection", _camera->projection());
+        _blockShader->setUniform("u_projection", _camera->projection(), true);
         _screenShader = std::make_shared<lithium::ShaderProgram>("shaders/screenshader.vert", "shaders/screenshader.frag");
         _sdfTextShader = std::make_shared<lithium::ShaderProgram>("shaders/sdfText.vert", "shaders/sdfText.frag");
-        _sdfTextShader->setUniform("u_projection", _camera->projection());
+        _sdfTextShader->setUniform("u_projection", _camera->projection(), true);
         _sdfTextShader->setUniform("u_texture", 0);
         _orthoCamera = new lithium::OrthographicCamera(0, resolution.x, 0, resolution.y, -10000.0f, 10000.0f);
         _sdfTextOrthoShader = std::make_shared<lithium::ShaderProgram>("shaders/sdfTextOrtho.vert", "shaders/sdfText.frag");
         _sdfTextOrthoShader->setUniform("u_texture", 0);
-        _sdfTextOrthoShader->setUniform("u_camera", _orthoCamera->matrix());
+        _sdfTextOrthoShader->setUniform("u_camera", _orthoProjView);
+        _instShader = std::make_shared<lithium::ShaderProgram>("shaders/instances.vert", "shaders/object.frag");
+        _instShader->setUniform("u_projection", _camera->projection(), true);
+        _instShader->setUniform("u_texture_0", 0);
         _msaaShader = std::make_shared<lithium::ShaderProgram>("shaders/screenshader.vert", "shaders/msaa.frag");
         _camera->setPosition(glm::vec3{4.0f, 8.0f, 8.0f});
-        _camera->setTarget(glm::vec3{0.0f, -0.5f, 0.0f});
+        _camera->setTarget(glm::vec3{0.0f, -1.0f, 0.0f});
 
         _frameBuffer->bind();
             _frameBuffer->createTexture(GL_COLOR_ATTACHMENT0, GL_RGBA16F, GL_RGBA, GL_FLOAT);
@@ -59,10 +64,18 @@ public:
         _frameBuffer->unbind();
 
         _mainGroup = createRenderGroup([this](lithium::Renderable* renderable) -> bool {
-            return dynamic_cast<lithium::Object*>(renderable) && dynamic_cast<lithium::Text*>(renderable) == nullptr;
+            return dynamic_cast<lithium::Object*>(renderable) && dynamic_cast<lithium::Text*>(renderable) == nullptr && dynamic_cast<lithium::InstancedObject<glm::mat4>*>(renderable) == nullptr;
+        });
+
+        _instGroup = createRenderGroup([this](lithium::Renderable* renderable) -> bool {
+            return dynamic_cast<lithium::InstancedObject<glm::mat4>*>(renderable);
         });
 
         _textGroup = createRenderGroup([this](lithium::Renderable* renderable) -> bool {
+            return dynamic_cast<lithium::Text*>(renderable);
+        });
+
+        _text2DGroup = createRenderGroup([this](lithium::Renderable* renderable) -> bool {
             return dynamic_cast<lithium::Text*>(renderable);
         });
 
@@ -77,10 +90,15 @@ public:
             _screenMesh->draw();
             glDepthMask(GL_TRUE);
             _blockShader->setUniform("u_view", _camera->view());
+            _blockShader->setUniform("u_view_pos", _camera->position());
+            _blockShader->setUniform("u_time", _time);
             _mainGroup->render(_blockShader.get());
+            _instShader->setUniform("u_view", _camera->view());
+            _instShader->setUniform("u_view_pos", _camera->position());
+            _instGroup->render(_instShader.get());
             _sdfTextShader->setUniform("u_view", _camera->view());
             _textGroup->render(_sdfTextShader.get());
-            _textGroup->render(_sdfTextOrthoShader.get());
+            _text2DGroup->render(_sdfTextOrthoShader.get());
         }));
 
         _finalStage = addRenderStage(std::make_shared<lithium::RenderStage>(nullptr, viewport, [this](){
@@ -128,8 +146,14 @@ public:
         _finalStage->setEnabled(msaa);
     }
 
+    void setTime(float time)
+    {
+        _time = time;
+    }
+
 private:
     std::shared_ptr<lithium::ShaderProgram> _blockShader{nullptr};
+    std::shared_ptr<lithium::ShaderProgram> _instShader{nullptr};
     std::shared_ptr<lithium::ShaderProgram> _screenShader{nullptr};
     std::shared_ptr<lithium::ShaderProgram> _sdfTextShader{nullptr};
     std::shared_ptr<lithium::ShaderProgram> _sdfTextOrthoShader{nullptr};
@@ -139,7 +163,9 @@ private:
     std::shared_ptr<lithium::Object> _object;
     std::shared_ptr<lithium::Mesh> _screenMesh;
     std::shared_ptr<lithium::RenderGroup> _mainGroup;
+    std::shared_ptr<lithium::RenderGroup> _instGroup;
     std::shared_ptr<lithium::RenderGroup> _textGroup;
+    std::shared_ptr<lithium::RenderGroup> _text2DGroup;
     std::shared_ptr<lithium::RenderStage> _mainStage;
     std::shared_ptr<lithium::RenderStage> _finalStage;
     std::shared_ptr<lithium::RenderStage> _simpleStage;
@@ -147,4 +173,5 @@ private:
     glm::mat4 _orthoView;
     glm::mat4 _orthoProjView;
     lithium::OrthographicCamera* _orthoCamera;
+    float _time{0.0f};
 };
