@@ -12,6 +12,8 @@
 #include "glinstancedobject.h"
 #include "glcollisionsystem.h"
 #include "game.h"
+#include "ecs.h"
+#include "component.h"
 
 class App : public lithium::Application
 {
@@ -116,7 +118,13 @@ public:
                     text->setRotation(glm::vec3{-90.0f, 0.0f, 0.0f});
                     text->setColor(glm::vec4{glm::vec3(0.7f), 1.0f});
                     _pipeline->addRenderable(text.get());
-                    _pipeline->addRenderable(object.get());
+                    //_pipeline->addRenderable(object.get());
+                    ecs::Entity entity;
+                    ecs::attach<component::Translation,component::Rotation,component::Scale>(entity);
+                    ecs::attach<component::ModelMatrix>(entity);
+                    ecs::attach<component::Time>(entity);
+                    ecs::attach<component::Wiggable>(entity);
+                    _entities.push_back(entity);
                     std::shared_ptr<Tile> tile{new Tile(object, text)};
                     _rows[z + goptions::numRows / 2].push_back(tile);
                     _tiles.push_back(tile);
@@ -184,6 +192,7 @@ public:
         input()->addPressedCallback(GLFW_KEY_1, msaaHandler);
         input()->addPressedCallback(GLFW_KEY_2, msaaHandler);
         _game.start();
+
     }
 
     virtual ~App() noexcept
@@ -264,6 +273,13 @@ public:
         _pipeline->camera()->update(dt);
         _pipeline->setTime(time());
         _pipeline->render();
+
+        _wiggleSystem.update(_entities,[](ecs::Entity& entity, const Time& time, const Wiggable& wiggable, glm::vec3& scale){
+            if(wiggable.wiggeling)
+            {
+                scale.x = scale.y = scale.z = 1.0f + sin(time.seconds) * 0.06f;
+            }
+        });
     }
 
     virtual void onFramebufferResized(int width, int height)
@@ -463,6 +479,9 @@ private:
     std::shared_ptr<lithium::Object> _floorPlane{nullptr};
     std::vector<std::shared_ptr<Tile>> _rows[goptions::numRows];
     std::shared_ptr<lithium::Input::KeyCache> _keyCache;
+    std::vector<ecs::Entity> _entities;
+    ecs::System<component::Translation,component::Rotation,component::Scale> _transformationSystem;
+    ecs::System<const component::Time,const component::Wiggable,component::Scale> _wiggleSystem;
 };
 
 int main(int argc, const char* argv[])
